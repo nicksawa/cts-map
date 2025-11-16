@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>HKD map with GPS (アフィン変換)</title>
+<style>
+  body { font-family: system-ui; padding: 10px; }
+  .frame { 
+    position: relative; 
+    display: inline-block; 
+    width: 100%;
+    /* HKD.jpg (1045x587) のアスペクト比 56.17% に調整 */
+    padding-bottom: 56.17%; 
+  }
+  #mapimg { 
+    display: block; 
+    position: absolute; 
+    top: 0;
+    left: 0;
+    width: 100%; 
+    height: 100%; 
+    object-fit: cover;
+  }
+  .marker {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    pointer-events: none;
+    text-align: center;
+  }
+  .pin {
+    width: 18px; height: 18px;
+    background: rgba(220,30,30,0.95);
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 0 4px rgba(0,0,0,0.4);
+  }
+  .label {
+    margin-top: 4px;
+    background: rgba(255,255,255,0.9);
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<h3>HKD.jpg 上に現在位置を表示（アフィン変換）</h3>
+
+<div class="frame" id="frame">
+    <img id="mapimg" src="hkd.jpg" alt="函館空港図">
+</div>
