@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>HKD Map with GPS</title>
+<title>HKD Map with GPS（自動更新）</title>
 <style>
 body { font-family: system-ui; padding: 10px; }
 .frame {
   position: relative;
   width: 100%;
-  max-width: 1045px; /* 元画像の幅 */
+  max-width: 1045px;
   margin: auto;
 }
 #mapimg {
   display: block;
   width: 100%;
-  height: auto; /* アスペクト比を維持 */
+  height: auto;
 }
 .marker {
   position: absolute;
@@ -37,18 +37,16 @@ body { font-family: system-ui; padding: 10px; }
   border-radius: 4px;
   font-size: 12px;
 }
-button { margin-top: 10px; }
+#status { margin-top: 10px; }
 </style>
 </head>
 <body>
 
-<h3>HKD.jpg 上に現在位置を表示</h3>
+<h3>HKD.jpg 上に現在位置を表示（自動更新）</h3>
 <div class="frame" id="frame">
   <img id="mapimg" src="hkd.jpg" alt="HKD map">
 </div>
-
-<button id="locBtn">現在位置を取得</button>
-<div id="status"></div>
+<div id="status">位置情報取得中...</div>
 
 <script>
 // DMS → 度
@@ -95,7 +93,8 @@ img.addEventListener("load", ()=>{
     return {x: u*W, y: v*H};
   };
 
-  status.textContent="画像読み込み完了。GPS取得可能です。";
+  status.textContent="画像読み込み完了。GPS取得中...";
+  startWatchPosition();
 });
 
 // マーカー表示
@@ -113,15 +112,20 @@ function showMarker(lat, lon, acc){
   frame.appendChild(m);
 }
 
-document.getElementById("locBtn").onclick=function(){
-  if(!latLonToPixel||!navigator.geolocation){ status.textContent="位置情報が利用できません"; return; }
-  status.textContent="位置情報取得中...";
-  navigator.geolocation.getCurrentPosition(pos=>{
+// ページ読み込み後に継続取得
+function startWatchPosition(){
+  if(!navigator.geolocation){ status.textContent="位置情報が利用できません"; return; }
+
+  navigator.geolocation.watchPosition(pos=>{
     const lat=pos.coords.latitude, lon=pos.coords.longitude, acc=pos.coords.accuracy;
     showMarker(lat, lon, acc);
     status.textContent=`取得: ${lat.toFixed(6)}, ${lon.toFixed(6)} (±${Math.round(acc)}m)`;
-  }, err=>{ status.textContent="エラー: "+err.message; }, {enableHighAccuracy:true, maximumAge:3000, timeout:10000});
-};
+  }, err=>{ status.textContent="エラー: "+err.message; }, {
+    enableHighAccuracy:true,
+    maximumAge:1000,
+    timeout:10000
+  });
+}
 </script>
 
 </body>
