@@ -5,64 +5,111 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CTS Map GPS</title>
 <style>
-  body { font-family: sans-serif; padding: 10px; }
-  #map-container { position: relative; width: 100%; max-width: 800px; }
-  #cts-map { width: 100%; display: block; }
-  #marker {
-    position: absolute;
-    width: 18px;
-    height: 18px;
-    background-color: red;
-    border-radius: 50%;
-    border: 2px solid white;
-    transform: translate(-50%, -50%);
-    display: none;
-    z-index: 10;
-  }
+body { font-family: sans-serif; padding: 10px; }
+.frame {
+  position: relative;
+  width: 100%;
+  max-width: 1045px; /* 元画像の幅 */
+  margin: auto;
+}
+#cts-map {
+  width: 100%;
+  height: auto; /* アスペクト比固定 */
+  display: block;
+}
+.marker {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  text-align: center;
+}
+.pin {
+  width: 18px; height: 18px;
+  background: rgba(220,30,30,0.95);
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.label {
+  margin-top: 4px;
+  background: rgba(255,255,255,0.9);
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+button { position: fixed; left: 10px; bottom: 10px; z-index: 20; padding: 8px 12px; }
+#status { margin-top: 10px; }
 </style>
 </head>
 <body>
-<h2>CTS Map 現在位置</h2>
-<div id="map-container">
-  <img id="cts-map" src="cts.jpg" alt="CTS Map">
-  <div id="marker"></div>
+
+<h3>CTS.jpg 上に現在位置を表示</h3>
+<div class="frame" id="frame">
+  <img id="cts-map" src="CTS.jpg" alt="CTS map">
 </div>
 
+<button id="locBtn">現在位置を取得</button>
+<div id="status"></div>
+
 <script>
-  // 4隅の座標
-  const topLeft     = { lat: 42.791325, lon: 141.698869 }; // 左上
-  const bottomRight = { lat: 42.759347, lon: 141.676080 }; // 右下
+// 基準点（左上、右下）
+const topLeft     = { lat: 42.791325, lon: 141.698869 }; // 左上
+const bottomRight = { lat: 42.759347, lon: 141.676080 }; // 右下
 
-  function updateMarker(position) {
-    const lat = position.coords.latitude;
-    const lon = position.coords.longitude;
-    const img = document.getElementById("cts-map");
-    const marker = document.getElementById("marker");
+function showMarker(lat, lon, acc) {
+  const frame = document.getElementById("frame");
+  const img = document.getElementById("cts-map");
+  let marker = document.querySelector(".marker");
+  if (marker) marker.remove();
 
-    const w = img.clientWidth;
-    const h = img.clientHeight;
+  const w = img.clientWidth;
+  const h = img.clientHeight;
 
-    const x = ((lon - topLeft.lon) / (bottomRight.lon - topLeft.lon)) * w;
-    const y = ((lat - topLeft.lat) / (bottomRight.lat - topLeft.lat)) * h;
+  // 緯度経度の割合
+  let xRatio = (lon - topLeft.lon) / (bottomRight.lon - topLeft.lon);
+  let yRatio = (lat - topLeft.lat) / (bottomRight.lat - topLeft.lat);
 
-    marker.style.left = x + "px";
-    marker.style.top = y + "px";
-    marker.style.display = "block";
+  // 元画像のアスペクト比
+  const imgAspect = 1045 / 461;
+  const displayedAspect = w / h;
+  if(displayedAspect !== imgAspect) {
+    yRatio = yRatio * (imgAspect / displayedAspect);
   }
 
-  function errorHandler(err) {
-    alert("位置情報を取得できません: " + err.message);
-  }
+  const x = xRatio * w;
+  const y = yRatio * h;
 
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(updateMarker, errorHandler, {
-      enableHighAccuracy: true,
-      maximumAge: 3000,
-      timeout: 10000
-    });
-  } else {
-    alert("このブラウザでは位置情報が利用できません。");
+  marker = document.createElement("div");
+  marker.className = "marker";
+  marker.style.left = x + "px";
+  marker.style.top  = y + "px";
+  marker.innerHTML = `<div class="pin"></div>
+                      <div class="label">${lat.toFixed(6)}, ${lon.toFixed(6)}<br>±${Math.round(acc)}m</div>`;
+  frame.appendChild(marker);
+}
+
+document.getElementById("locBtn").onclick = function() {
+  const status = document.getElementById("status");
+  if (!navigator.geolocation) {
+    status.textContent = "このブラウザでは位置情報が利用できません。";
+    return;
   }
+  status.textContent = "位置情報取得中...";
+  navigator.geolocation.getCurrentPosition(pos => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const acc = pos.coords.accuracy;
+    showMarker(lat, lon, acc);
+    status.textContent = `取得: ${lat.toFixed(6)}, ${lon.toFixed(6)} (±${Math.round(acc)}m)`;
+  }, err => {
+    status.textContent = "エラー: " + err.message;
+  }, {
+    enableHighAccuracy: true,
+    maximumAge: 3000,
+    timeout: 10000
+  });
+};
 </script>
+
 </body>
 </html>
