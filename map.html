@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CTS Map GPS</title>
+<title>CTS Map GPS（自動取得）</title>
 <style>
 body { font-family: sans-serif; padding: 10px; }
 .frame {
   position: relative;
   width: 100%;
-  max-width: 1045px; /* 元画像の幅 */
+  max-width: 1045px; /* 元画像幅 */
   margin: auto;
 }
 #cts-map {
@@ -37,30 +37,27 @@ body { font-family: sans-serif; padding: 10px; }
   border-radius: 4px;
   font-size: 12px;
 }
-button { position: fixed; left: 10px; bottom: 10px; z-index: 20; padding: 8px 12px; }
 #status { margin-top: 10px; }
 </style>
 </head>
 <body>
 
-<h3>CTS.jpg 上に現在位置を表示</h3>
+<h3>CTS.jpg 上に現在位置を表示（自動更新）</h3>
 <div class="frame" id="frame">
   <img id="cts-map" src="cts.jpg" alt="CTS map">
 </div>
-
-<button id="locBtn">現在位置を取得</button>
-<div id="status"></div>
+<div id="status">位置情報取得中...</div>
 
 <script>
-// 基準点（左上、右下）
-const topLeft     = { lat: 42.791325, lon: 141.698869 }; // 左上
-const bottomRight = { lat: 42.759347, lon: 141.676080 }; // 右下
+// 基準点（左上・右下）
+const topLeft     = { lat: 42.791325, lon: 141.698869 };
+const bottomRight = { lat: 42.759347, lon: 141.676080 };
 
-function showMarker(lat, lon, acc) {
+function showMarker(lat, lon, acc){
   const frame = document.getElementById("frame");
   const img = document.getElementById("cts-map");
   let marker = document.querySelector(".marker");
-  if (marker) marker.remove();
+  if(marker) marker.remove();
 
   const w = img.clientWidth;
   const h = img.clientHeight;
@@ -69,12 +66,10 @@ function showMarker(lat, lon, acc) {
   let xRatio = (lon - topLeft.lon) / (bottomRight.lon - topLeft.lon);
   let yRatio = (lat - topLeft.lat) / (bottomRight.lat - topLeft.lat);
 
-  // 元画像のアスペクト比
+  // アスペクト比補正
   const imgAspect = 1045 / 461;
   const displayedAspect = w / h;
-  if(displayedAspect !== imgAspect) {
-    yRatio = yRatio * (imgAspect / displayedAspect);
-  }
+  if(displayedAspect !== imgAspect) yRatio *= (imgAspect / displayedAspect);
 
   const x = xRatio * w;
   const y = yRatio * h;
@@ -88,14 +83,16 @@ function showMarker(lat, lon, acc) {
   frame.appendChild(marker);
 }
 
-document.getElementById("locBtn").onclick = function() {
+// ページ読み込み時に自動開始
+window.addEventListener("load", () => {
   const status = document.getElementById("status");
-  if (!navigator.geolocation) {
+  if(!navigator.geolocation){
     status.textContent = "このブラウザでは位置情報が利用できません。";
     return;
   }
+
   status.textContent = "位置情報取得中...";
-  navigator.geolocation.getCurrentPosition(pos => {
+  navigator.geolocation.watchPosition(pos => {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
     const acc = pos.coords.accuracy;
@@ -105,10 +102,10 @@ document.getElementById("locBtn").onclick = function() {
     status.textContent = "エラー: " + err.message;
   }, {
     enableHighAccuracy: true,
-    maximumAge: 3000,
+    maximumAge: 1000,
     timeout: 10000
   });
-};
+});
 </script>
 
 </body>
