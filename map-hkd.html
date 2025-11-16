@@ -3,20 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CTS map with GPS</title>
+<title>HKD Map with GPS</title>
 <style>
 body { font-family: system-ui; padding: 10px; }
 .frame {
   position: relative;
-  display: inline-block;
   width: 100%;
-  padding-bottom: 56.17%; /* 画像アスペクト比 1045x587 */
+  max-width: 1045px; /* 元画像の幅 */
+  margin: auto;
 }
 #mapimg {
-  position: absolute;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
-  object-fit: cover;
+  display: block;
+  width: 100%;
+  height: auto; /* アスペクト比を維持 */
 }
 .marker {
   position: absolute;
@@ -43,7 +42,7 @@ button { margin-top: 10px; }
 </head>
 <body>
 
-<h3>hkd.jpg 上に現在位置を表示</h3>
+<h3>HKD.jpg 上に現在位置を表示</h3>
 <div class="frame" id="frame">
   <img id="mapimg" src="hkd.jpg" alt="HKD map">
 </div>
