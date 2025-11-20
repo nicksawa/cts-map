@@ -25,10 +25,11 @@
   }
   .marker {
     position: absolute;
-    transform: translate(-50%, -100%);
+    transform: translate(-50%, -100%); /* ピンの先端を座標に合わせる */
     pointer-events: none;
     text-align: center;
     z-index: 100;
+    transition: top 0.5s, left 0.5s; /* なめらか移動 */
   }
   .pin {
     width: 18px; height: 18px;
@@ -45,6 +46,7 @@
     border-radius: 4px;
     font-size: 11px;
     white-space: nowrap;
+    display: inline-block;
   }
   #status {
     margin-top: 10px;
@@ -75,7 +77,7 @@ function d(deg, min, sec) {
 // 3点座標（CTS）
 //==========================
 
-// ★ 左上（LT）※今回あなたが提供した座標
+// ★ 左上（LT）入力ありがとうございます！
 const LT = {
   lat: d(42,47,28.77),
   lon: d(141,41,55.93)
@@ -94,7 +96,7 @@ const RB = {
 };
 
 //==========================
-// 緯度経度 → 平面XY
+// 緯度経度 → 平面XY (メートル近似)
 //==========================
 function geoToXY(lat, lon, baseLat) {
   const baseRad = baseLat * Math.PI / 180;
@@ -106,7 +108,7 @@ function geoToXY(lat, lon, baseLat) {
   };
 }
 
-let latLonToPixel = null;
+let latLonToPercent = null; // ピクセルではなくパーセントを返す関数にします
 const img = document.getElementById("mapimg");
 const status = document.getElementById("status");
 
@@ -115,43 +117,53 @@ const status = document.getElementById("status");
 //==========================
 img.addEventListener("load", ()=> {
   
-  const W = img.naturalWidth;
-  const H = img.naturalHeight;
-
   const baseLat = (LT.lat + LB.lat + RB.lat) / 3;
 
+  // 3点をメートル座標へ
   const LTm = geoToXY(LT.lat, LT.lon, baseLat);
   const LBm = geoToXY(LB.lat, LB.lon, baseLat);
   const RBm = geoToXY(RB.lat, RB.lon, baseLat);
 
-  const dXLB = LBm.x - LTm.x, dYLB = LBm.y - LTm.y;
-  const dXRB = RBm.x - LTm.x, dYRB = RBm.y - LTm.y;
+  // ベクトル計算 (ここを修正しました)
+  // 1. 下方向ベクトル (左辺: LT -> LB)
+  const vecY_x = LBm.x - LTm.x;
+  const vecY_y = LBm.y - LTm.y;
 
-  const A = [[dXLB, dXRB], [dYLB, dYRB]];
+  // 2. 右方向ベクトル (底辺: LB -> RB)
+  const vecX_x = RBm.x - LBm.x;
+  const vecX_y = RBm.y - LBm.y;
+
+  // 行列 A = [vecX, vecY]
+  const A = [[vecX_x, vecY_x], [vecX_y, vecY_y]];
   const det = A[0][0] * A[1][1] - A[0][1] * A[1][0];
 
   if (Math.abs(det) < 1e-9) {
-    status.textContent = "アフィン変換の逆行列が作れません。座標が直線上に並んでいます。";
+    status.textContent = "エラー: 座標が直線上に並んでおり計算できません。";
     return;
   }
 
+  // 逆行列 A^-1
   const Ai = [
     [ A[1][1]/det, -A[0][1]/det ],
     [ -A[1][0]/det, A[0][0]/det ]
   ];
 
-  // 緯度経度 → 画像内ピクセル座標
-  latLonToPixel = function(lat, lon){
+  // 緯度経度 → 画像内パーセント座標 (0-100)
+  latLonToPercent = function(lat, lon){
     const m = geoToXY(lat, lon, baseLat);
+    
+    // LTからの差分
     const dx = m.x - LTm.x;
     const dy = m.y - LTm.y;
 
+    // 方程式: P - LT = u * vecX + v * vecY
+    // u = 横方向の割合 (0-1), v = 縦方向の割合 (0-1)
     const u = Ai[0][0] * dx + Ai[0][1] * dy;
     const v = Ai[1][0] * dx + Ai[1][1] * dy;
 
     return {
-      x: u * W,
-      y: v * H
+      x: u * 100, // %
+      y: v * 100  // %
     };
   };
 
@@ -160,9 +172,14 @@ img.addEventListener("load", ()=> {
   //==========================
   // リアルタイム位置追跡開始
   //==========================
+  if (!navigator.geolocation) {
+    status.textContent = "GPS非対応のブラウザです";
+    return;
+  }
+
   navigator.geolocation.watchPosition(showGPS, showError, {
     enableHighAccuracy: true,
-    maximumAge: 1000,
+    maximumAge: 0,
     timeout: 10000
   });
 });
@@ -171,33 +188,38 @@ img.addEventListener("load", ()=> {
 // マーカーを表示
 //==========================
 function showGPS(pos) {
-  if (!latLonToPixel) return;
+  if (!latLonToPercent) return;
 
   const lat = pos.coords.latitude;
   const lon = pos.coords.longitude;
   const acc = pos.coords.accuracy;
 
-  const p = latLonToPixel(lat, lon);
+  // パーセント座標を取得
+  const p = latLonToPercent(lat, lon);
 
   let m = document.querySelector(".marker");
+  const frame = document.getElementById("frame");
+
   if (!m) {
     m = document.createElement("div");
     m.className = "marker";
     m.innerHTML = `<div class="pin"></div><div class="label"></div>`;
-    document.getElementById("frame").appendChild(m);
+    frame.appendChild(m);
   }
 
-  const frame = document.getElementById("frame");
-  const fw = frame.clientWidth;
-  const fh = frame.clientHeight;
+  // 座標更新
+  m.style.left = p.x + "%";
+  m.style.top  = p.y + "%";
 
-  m.style.left = (p.x / W * 100) + "%";
-  m.style.top  = (p.y / H * 100) + "%";
-
-  m.querySelector(".label").textContent =
-    `${lat.toFixed(6)}, ${lon.toFixed(6)} ±${Math.round(acc)}m`;
-
-  status.textContent = `現在位置取得中: ${lat.toFixed(6)}, ${lon.toFixed(6)} ±${Math.round(acc)}m`;
+  // ラベルとステータス更新
+  // 範囲外チェック (画面外50%以上離れたら範囲外とする)
+  if (p.x < -50 || p.x > 150 || p.y < -50 || p.y > 150) {
+    m.querySelector(".label").textContent = "範囲外";
+    status.textContent = `範囲外: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  } else {
+    m.querySelector(".label").textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    status.textContent = `現在地: ${lat.toFixed(6)}, ${lon.toFixed(6)} (精度±${Math.round(acc)}m)`;
+  }
 }
 
 function showError(err) {
