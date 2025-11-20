@@ -11,7 +11,7 @@
     display: inline-block; 
     width: 100%;
     max-width: 100%;
-    /* CTS.jpg のアスペクト比 (例: 44.11%) */
+    /* CTS.jpg のアスペクト比 (461 / 1045 ≒ 44.11%) */
     padding-bottom: 44.11%; 
   }
   #mapimg { 
@@ -25,11 +25,10 @@
   }
   .marker {
     position: absolute;
-    transform: translate(-50%, -100%); /* ピンの先端を現在地に */
+    transform: translate(-50%, -100%);
     pointer-events: none;
     text-align: center;
     z-index: 100;
-    transition: top 0.5s, left 0.5s; /* 滑らかに動く */
   }
   .pin {
     width: 18px; height: 18px;
@@ -46,7 +45,6 @@
     border-radius: 4px;
     font-size: 11px;
     white-space: nowrap;
-    display: inline-block;
   }
   #status {
     margin-top: 10px;
@@ -57,44 +55,155 @@
 </head>
 <body>
 
-<h3>CTS Map (Auto Start)</h3>
+<h3>CTS Map（リアルタイム現在位置）</h3>
 
 <div class="frame" id="frame">
   <img id="mapimg" src="cts.jpg" alt="CTS Map">
 </div>
 
-<div id="status">位置情報を待機中...</div>
+<div id="status">画像読み込み中...</div>
 
 <script>
 //==========================
-// 3点アフィン変換ロジック
+// DMS → 10 進数
 //==========================
-
-// DMS → 10進数変換
 function d(deg, min, sec) { 
   return deg + min/60 + sec/3600; 
 }
 
-//--------------------------------------------------
-// ★★★ 【必須】左上の座標を入力してください ★★★
-//--------------------------------------------------
+//==========================
+// 3点座標（CTS）
+//==========================
+
+// ★ 左上（LT）※今回あなたが提供した座標
 const LT = {
-  lat: d(0, 0, 0), // ← AIPを見て数値を入力！
-  lon: d(0, 0, 0)  // ← AIPを見て数値を入力！
+  lat: d(42,47,28.77),
+  lon: d(141,41,55.93)
 };
 
-// 既に頂いている座標 (左下)
+// 左下（LB）
 const LB = {
-  lat: d(42, 47, 20.19),
-  lon: d(141, 40, 19.59)
+  lat: d(42,47,20.19),
+  lon: d(141,40,19.59)
 };
 
-// 既に頂いている座標 (右下)
+// 右下（RB）
 const RB = {
-  lat: d(42, 45, 42.58),
-  lon: d(141, 42, 13.89)
+  lat: d(42,45,42.58),
+  lon: d(141,42,13.89)
 };
 
-// 緯度経度を平面メートル座標に変換
+//==========================
+// 緯度経度 → 平面XY
+//==========================
 function geoToXY(lat, lon, baseLat) {
-  const Rlat = 111132.92 - 559.8
+  const baseRad = baseLat * Math.PI / 180;
+  const Rlat = 111132.92 - 559.82 * Math.cos(2 * baseRad) + 1.175 * Math.cos(4 * baseRad);
+  const Rlon = 111412.84 * Math.cos(baseRad) - 93.5 * Math.cos(3 * baseRad);
+  return {
+    x: lon * Rlon,
+    y: lat * Rlat
+  };
+}
+
+let latLonToPixel = null;
+const img = document.getElementById("mapimg");
+const status = document.getElementById("status");
+
+//==========================
+// 画像ロード後にアフィン変換行列を計算
+//==========================
+img.addEventListener("load", ()=> {
+  
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+
+  const baseLat = (LT.lat + LB.lat + RB.lat) / 3;
+
+  const LTm = geoToXY(LT.lat, LT.lon, baseLat);
+  const LBm = geoToXY(LB.lat, LB.lon, baseLat);
+  const RBm = geoToXY(RB.lat, RB.lon, baseLat);
+
+  const dXLB = LBm.x - LTm.x, dYLB = LBm.y - LTm.y;
+  const dXRB = RBm.x - LTm.x, dYRB = RBm.y - LTm.y;
+
+  const A = [[dXLB, dXRB], [dYLB, dYRB]];
+  const det = A[0][0] * A[1][1] - A[0][1] * A[1][0];
+
+  if (Math.abs(det) < 1e-9) {
+    status.textContent = "アフィン変換の逆行列が作れません。座標が直線上に並んでいます。";
+    return;
+  }
+
+  const Ai = [
+    [ A[1][1]/det, -A[0][1]/det ],
+    [ -A[1][0]/det, A[0][0]/det ]
+  ];
+
+  // 緯度経度 → 画像内ピクセル座標
+  latLonToPixel = function(lat, lon){
+    const m = geoToXY(lat, lon, baseLat);
+    const dx = m.x - LTm.x;
+    const dy = m.y - LTm.y;
+
+    const u = Ai[0][0] * dx + Ai[0][1] * dy;
+    const v = Ai[1][0] * dx + Ai[1][1] * dy;
+
+    return {
+      x: u * W,
+      y: v * H
+    };
+  };
+
+  status.textContent = "GPS 取得開始...";
+
+  //==========================
+  // リアルタイム位置追跡開始
+  //==========================
+  navigator.geolocation.watchPosition(showGPS, showError, {
+    enableHighAccuracy: true,
+    maximumAge: 1000,
+    timeout: 10000
+  });
+});
+
+//==========================
+// マーカーを表示
+//==========================
+function showGPS(pos) {
+  if (!latLonToPixel) return;
+
+  const lat = pos.coords.latitude;
+  const lon = pos.coords.longitude;
+  const acc = pos.coords.accuracy;
+
+  const p = latLonToPixel(lat, lon);
+
+  let m = document.querySelector(".marker");
+  if (!m) {
+    m = document.createElement("div");
+    m.className = "marker";
+    m.innerHTML = `<div class="pin"></div><div class="label"></div>`;
+    document.getElementById("frame").appendChild(m);
+  }
+
+  const frame = document.getElementById("frame");
+  const fw = frame.clientWidth;
+  const fh = frame.clientHeight;
+
+  m.style.left = (p.x / W * 100) + "%";
+  m.style.top  = (p.y / H * 100) + "%";
+
+  m.querySelector(".label").textContent =
+    `${lat.toFixed(6)}, ${lon.toFixed(6)} ±${Math.round(acc)}m`;
+
+  status.textContent = `現在位置取得中: ${lat.toFixed(6)}, ${lon.toFixed(6)} ±${Math.round(acc)}m`;
+}
+
+function showError(err) {
+  status.textContent = "GPS エラー: " + err.message;
+}
+</script>
+
+</body>
+</html>
