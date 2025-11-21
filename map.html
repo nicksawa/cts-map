@@ -3,227 +3,252 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>CTS Map GPS (Auto & Affine)</title>
+<title>CTS Map (Calibration Mode)</title>
 <style>
-  body { font-family: sans-serif; padding: 10px; text-align: center; }
+  body { font-family: sans-serif; padding: 0; margin: 0; text-align: center; background: #f0f0f0; }
+  .container { padding: 10px; max-width: 1000px; margin: auto; }
   .frame { 
     position: relative; 
     display: inline-block; 
     width: 100%;
-    max-width: 100%;
-    /* CTS.jpg のアスペクト比 (461 / 1045 ≒ 44.11%) */
-    padding-bottom: 44.11%; 
+    /* アスペクト比は自動計算されますが、初期表示用に確保 */
+    min-height: 300px;
   }
   #mapimg { 
     display: block; 
-    position: absolute; 
-    top: 0;
-    left: 0;
     width: 100%; 
-    height: 100%; 
-    object-fit: contain;
+    height: auto; 
   }
+  
+  /* 現在地マーカー（赤） */
   .marker {
     position: absolute;
-    transform: translate(-50%, -100%); /* ピンの先端を座標に合わせる */
-    pointer-events: none;
-    text-align: center;
+    transform: translate(-50%, -50%);
     z-index: 100;
-    transition: top 0.5s, left 0.5s; /* なめらか移動 */
+    pointer-events: none;
+    transition: left 0.5s linear, top 0.5s linear;
   }
   .pin {
-    width: 18px; height: 18px;
-    background: rgba(220,30,30,0.95);
+    width: 16px; height: 16px;
+    background: rgba(255, 0, 0, 0.9);
+    border: 2px solid white;
     border-radius: 50%;
-    border: 2px solid #fff;
-    box-shadow: 0 0 4px rgba(0,0,0,0.4);
-    margin: 0 auto;
+    box-shadow: 0 0 5px rgba(0,0,0,0.5);
   }
-  .label {
-    margin-top: 4px;
-    background: rgba(255,255,255,0.8);
-    padding: 2px 5px;
-    border-radius: 4px;
-    font-size: 11px;
+  
+  /* 基準点マーカー（青：調整用） */
+  .ref-marker {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    z-index: 50;
+    width: 12px; height: 12px;
+    background: blue;
+    border: 2px solid white;
+    border-radius: 50%;
+  }
+  .ref-label {
+    position: absolute;
+    top: 14px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,100,0.8);
+    color: white;
+    font-size: 10px;
+    padding: 2px 4px;
+    border-radius: 3px;
     white-space: nowrap;
-    display: inline-block;
   }
-  #status {
-    margin-top: 10px;
+
+  #status { margin-top: 10px; font-size: 14px; font-weight: bold; }
+  .control-panel { 
+    margin-bottom: 10px; text-align: left; background: #fff; padding: 10px; border-radius: 8px; 
     font-size: 12px;
-    color: #333;
   }
 </style>
 </head>
 <body>
 
-<h3>CTS Map（リアルタイム現在位置）</h3>
+<div class="container">
+  <h3>CTS Map (位置ズレ補正版)</h3>
+  
+  <div class="control-panel">
+    <strong>設定手順:</strong><br>
+    1. 地図上の<b>青い点 (LT, LB, RB)</b> が、AIPの座標点（角）と合っているか確認してください。<br>
+    2. 合っていない場合（余白がある場合など）、下記コード内の <code>imgX, imgY</code> の%数値を調整してください。<br>
+    3. 青い点が合致すれば、現在地（赤）は正確に表示されます。
+  </div>
 
-<div class="frame" id="frame">
-  <img id="mapimg" src="cts.jpg" alt="CTS Map">
+  <div class="frame" id="frame">
+    <img id="mapimg" src="cts.jpg" alt="CTS Map">
+  </div>
+
+  <div id="status">システム準備中...</div>
 </div>
-
-<div id="status">画像読み込み中...</div>
 
 <script>
 //==========================
-// DMS → 10 進数
+// 設定エリア (ここを調整！)
 //==========================
-function d(deg, min, sec) { 
-  return deg + min/60 + sec/3600; 
+
+// 1. 緯度経度 (AIPから読み取った座標)
+function d(deg, min, sec) { return deg + min/60 + sec/3600; }
+
+const GeoPoints = {
+  LT: { lat: d(42,47,28.77), lon: d(141,41,55.93) }, // 左上
+  LB: { lat: d(42,47,20.19), lon: d(141,40,19.59) }, // 左下
+  RB: { lat: d(42,45,42.58), lon: d(141,42,13.89) }  // 右下
+};
+
+// 2. 画像上の位置 (％指定)
+// 画像の端に余白がある場合、ここの数値を 0% や 100% から変更してください。
+// 例: 左端に少し余白があるなら imgX: 2.5 (2.5%) など
+const ImagePoints = {
+  LT: { imgX: 0,   imgY: 0 },   // 左上 (通常 0, 0)
+  LB: { imgX: 0,   imgY: 100 }, // 左下 (通常 0, 100)
+  RB: { imgX: 100, imgY: 100 }  // 右下 (通常 100, 100)
+};
+
+//==========================
+// アフィン変換ロジック (Meters -> Pixels)
+//==========================
+
+// 緯度経度 -> 平面メートル (簡易メルカトル)
+function geoToMeters(lat, lon, baseLat) {
+  const R_EARTH = 6378137;
+  const rad = Math.PI / 180;
+  const x = R_EARTH * (lon * rad) * Math.cos(baseLat * rad);
+  const y = R_EARTH * (lat * rad);
+  return { x, y };
 }
 
-//==========================
-// 3点座標（CTS）
-//==========================
-
-// ★ 左上（LT）入力ありがとうございます！
-const LT = {
-  lat: d(42,47,28.77),
-  lon: d(141,41,55.93)
-};
-
-// 左下（LB）
-const LB = {
-  lat: d(42,47,20.19),
-  lon: d(141,40,19.59)
-};
-
-// 右下（RB）
-const RB = {
-  lat: d(42,45,42.58),
-  lon: d(141,42,13.89)
-};
-
-//==========================
-// 緯度経度 → 平面XY (メートル近似)
-//==========================
-function geoToXY(lat, lon, baseLat) {
-  const baseRad = baseLat * Math.PI / 180;
-  const Rlat = 111132.92 - 559.82 * Math.cos(2 * baseRad) + 1.175 * Math.cos(4 * baseRad);
-  const Rlon = 111412.84 * Math.cos(baseRad) - 93.5 * Math.cos(3 * baseRad);
-  return {
-    x: lon * Rlon,
-    y: lat * Rlat
-  };
-}
-
-let latLonToPercent = null; // ピクセルではなくパーセントを返す関数にします
+let mapTransform = null; // 変換関数
 const img = document.getElementById("mapimg");
 const status = document.getElementById("status");
+const frame = document.getElementById("frame");
 
-//==========================
-// 画像ロード後にアフィン変換行列を計算
-//==========================
-img.addEventListener("load", ()=> {
-  
-  const baseLat = (LT.lat + LB.lat + RB.lat) / 3;
-
-  // 3点をメートル座標へ
-  const LTm = geoToXY(LT.lat, LT.lon, baseLat);
-  const LBm = geoToXY(LB.lat, LB.lon, baseLat);
-  const RBm = geoToXY(RB.lat, RB.lon, baseLat);
-
-  // ベクトル計算 (ここを修正しました)
-  // 1. 下方向ベクトル (左辺: LT -> LB)
-  const vecY_x = LBm.x - LTm.x;
-  const vecY_y = LBm.y - LTm.y;
-
-  // 2. 右方向ベクトル (底辺: LB -> RB)
-  const vecX_x = RBm.x - LBm.x;
-  const vecX_y = RBm.y - LBm.y;
-
-  // 行列 A = [vecX, vecY]
-  const A = [[vecX_x, vecY_x], [vecX_y, vecY_y]];
-  const det = A[0][0] * A[1][1] - A[0][1] * A[1][0];
-
-  if (Math.abs(det) < 1e-9) {
-    status.textContent = "エラー: 座標が直線上に並んでおり計算できません。";
-    return;
-  }
-
-  // 逆行列 A^-1
-  const Ai = [
-    [ A[1][1]/det, -A[0][1]/det ],
-    [ -A[1][0]/det, A[0][0]/det ]
-  ];
-
-  // 緯度経度 → 画像内パーセント座標 (0-100)
-  latLonToPercent = function(lat, lon){
-    const m = geoToXY(lat, lon, baseLat);
-    
-    // LTからの差分
-    const dx = m.x - LTm.x;
-    const dy = m.y - LTm.y;
-
-    // 方程式: P - LT = u * vecX + v * vecY
-    // u = 横方向の割合 (0-1), v = 縦方向の割合 (0-1)
-    const u = Ai[0][0] * dx + Ai[0][1] * dy;
-    const v = Ai[1][0] * dx + Ai[1][1] * dy;
-
-    return {
-      x: u * 100, // %
-      y: v * 100  // %
-    };
-  };
-
-  status.textContent = "GPS 取得開始...";
-
-  //==========================
-  // リアルタイム位置追跡開始
-  //==========================
-  if (!navigator.geolocation) {
-    status.textContent = "GPS非対応のブラウザです";
-    return;
-  }
-
-  navigator.geolocation.watchPosition(showGPS, showError, {
-    enableHighAccuracy: true,
-    maximumAge: 0,
-    timeout: 10000
-  });
+// 画像ロード後に計算開始
+img.addEventListener("load", () => {
+  initMap();
 });
 
-//==========================
-// マーカーを表示
-//==========================
-function showGPS(pos) {
-  if (!latLonToPercent) return;
+function initMap() {
+  // 青い基準点を描画
+  drawRefMarker("LT", ImagePoints.LT);
+  drawRefMarker("LB", ImagePoints.LB);
+  drawRefMarker("RB", ImagePoints.RB);
 
+  // 基準緯度
+  const baseLat = (GeoPoints.LT.lat + GeoPoints.LB.lat + GeoPoints.RB.lat) / 3;
+
+  // 1. 地理座標系 (メートル)
+  const P1 = geoToMeters(GeoPoints.LT.lat, GeoPoints.LT.lon, baseLat); // Origin
+  const P2 = geoToMeters(GeoPoints.LB.lat, GeoPoints.LB.lon, baseLat);
+  const P3 = geoToMeters(GeoPoints.RB.lat, GeoPoints.RB.lon, baseLat);
+
+  // 2. 画像座標系 (パーセント)
+  const Q1 = { x: ImagePoints.LT.imgX, y: ImagePoints.LT.imgY }; // Origin
+  const Q2 = { x: ImagePoints.LB.imgX, y: ImagePoints.LB.imgY };
+  const Q3 = { x: ImagePoints.RB.imgX, y: ImagePoints.RB.imgY };
+
+  // 3. 行列計算 (P -> Q)
+  // ベクトル P
+  const Px_v1 = P2.x - P1.x; const Py_v1 = P2.y - P1.y; // LT->LB
+  const Px_v2 = P3.x - P1.x; const Py_v2 = P3.y - P1.y; // LT->RB
+
+  // ベクトル Q
+  const Qx_v1 = Q2.x - Q1.x; const Qy_v1 = Q2.y - Q1.y;
+  const Qx_v2 = Q3.x - Q1.x; const Qy_v2 = Q3.y - Q1.y;
+
+  // Matrix P = [[Px_v1, Px_v2], [Py_v1, Py_v2]]
+  // Inverse P
+  const det = Px_v1 * Py_v2 - Px_v2 * Py_v1;
+  if (Math.abs(det) < 1e-9) {
+    status.textContent = "エラー: 座標設定が無効です（直線上にあります）";
+    return;
+  }
+  const invP = [
+    [Py_v2 / det, -Px_v2 / det],
+    [-Py_v1 / det, Px_v1 / det]
+  ];
+
+  // Matrix M = Matrix Q * Inverse P
+  // m11 m12
+  // m21 m22
+  const m11 = Qx_v1 * invP[0][0] + Qx_v2 * invP[1][0];
+  const m12 = Qx_v1 * invP[0][1] + Qx_v2 * invP[1][1];
+  const m21 = Qy_v1 * invP[0][0] + Qy_v2 * invP[1][0];
+  const m22 = Qy_v1 * invP[0][1] + Qy_v2 * invP[1][1];
+
+  // 変換関数作成
+  mapTransform = function(lat, lon) {
+    const cur = geoToMeters(lat, lon, baseLat);
+    // LTからの差分
+    const dx = cur.x - P1.x;
+    const dy = cur.y - P1.y;
+    
+    // アフィン変換
+    const imgX = m11 * dx + m12 * dy + Q1.x;
+    const imgY = m21 * dx + m22 * dy + Q1.y;
+
+    return { x: imgX, y: imgY };
+  };
+
+  startGPS();
+}
+
+// 基準点マーカーを描画する関数
+function drawRefMarker(name, pos) {
+  let el = document.getElementById("ref-" + name);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "ref-" + name;
+    el.className = "ref-marker";
+    el.innerHTML = `<div class="ref-label">${name}</div>`;
+    frame.appendChild(el);
+  }
+  el.style.left = pos.imgX + "%";
+  el.style.top  = pos.imgY + "%";
+}
+
+// GPS開始
+function startGPS() {
+  if (!navigator.geolocation) {
+    status.textContent = "GPS非対応";
+    return;
+  }
+  status.textContent = "GPS検索中...";
+  navigator.geolocation.watchPosition(updatePos, (err) => {
+    status.textContent = "GPSエラー: " + err.message;
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+}
+
+function updatePos(pos) {
+  if (!mapTransform) return;
+  
   const lat = pos.coords.latitude;
   const lon = pos.coords.longitude;
   const acc = pos.coords.accuracy;
 
-  // パーセント座標を取得
-  const p = latLonToPercent(lat, lon);
+  const p = mapTransform(lat, lon);
 
   let m = document.querySelector(".marker");
-  const frame = document.getElementById("frame");
-
   if (!m) {
     m = document.createElement("div");
     m.className = "marker";
-    m.innerHTML = `<div class="pin"></div><div class="label"></div>`;
+    m.innerHTML = `<div class="pin"></div>`;
     frame.appendChild(m);
   }
 
-  // 座標更新
   m.style.left = p.x + "%";
   m.style.top  = p.y + "%";
-
-  // ラベルとステータス更新
-  // 範囲外チェック (画面外50%以上離れたら範囲外とする)
-  if (p.x < -50 || p.x > 150 || p.y < -50 || p.y > 150) {
-    m.querySelector(".label").textContent = "範囲外";
+  
+  // 範囲チェック
+  if (p.x < 0 || p.x > 100 || p.y < 0 || p.y > 100) {
     status.textContent = `範囲外: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    m.style.opacity = "0.5";
   } else {
-    m.querySelector(".label").textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
     status.textContent = `現在地: ${lat.toFixed(6)}, ${lon.toFixed(6)} (精度±${Math.round(acc)}m)`;
+    m.style.opacity = "1";
   }
-}
-
-function showError(err) {
-  status.textContent = "GPS エラー: " + err.message;
 }
 </script>
 
