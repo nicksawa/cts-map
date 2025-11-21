@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>CTS Map (1601x1023)</title>
+<title>CTS Map (Draggable Calibration)</title>
 <style>
   body { font-family: sans-serif; margin: 0; padding: 0; background: #333; overflow: hidden; }
   
@@ -11,27 +11,14 @@
   .map-frame {
     position: relative;
     width: 100vw;
-    height: 80vh; /* 画面の80%を地図に */
+    height: 80vh; /* 上部に地図を表示 */
     overflow: auto;
     background: #fff;
   }
-  
-  /* 画像コンテナ：アスペクト比を固定してレイアウトシフトを防ぐ */
-  .img-container {
-    position: relative;
-    width: 100%;
-    /* 1023 / 1601 ≒ 63.9% */
-    padding-bottom: 63.9%; 
-    height: 0;
-  }
-
   #mapimg {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
     display: block;
+    width: 100%;
+    height: auto;
     pointer-events: none; /* 画像自体はドラッグさせない */
   }
 
@@ -65,10 +52,11 @@
   /* 青いピン（基準点：ドラッグ可能） */
   .ref-marker {
     position: absolute;
-    width: 40px; height: 40px; /* タッチ領域を少し大きく */
+    width: 30px; height: 30px;
     transform: translate(-50%, -50%);
     z-index: 1000;
     cursor: move;
+    /* タッチ操作しやすくする */
     touch-action: none; 
   }
   .ref-pin {
@@ -76,12 +64,12 @@
     background: blue;
     border: 2px solid white;
     border-radius: 50%;
-    margin: 13px auto; /* 中心合わせ */
+    margin: 8px auto; /* 中心合わせ */
     box-shadow: 0 0 5px rgba(0,0,0,0.5);
   }
   .ref-label {
     position: absolute;
-    top: -10px; left: 50%;
+    top: -15px; left: 50%;
     transform: translateX(-50%);
     color: white;
     background: blue;
@@ -103,16 +91,14 @@
   }
   .status-line { margin-bottom: 5px; font-size: 14px; color: #4fa; }
   .coord-info { color: #ccc; margin-bottom: 5px; }
-  button { padding: 5px 10px; margin-top: 5px; font-size: 14px; cursor: pointer; }
+  button { padding: 5px 10px; margin-top: 5px; font-size: 14px; }
 </style>
 </head>
 <body>
 
 <div class="map-frame" id="frame">
-  <div class="img-container">
-    <img id="mapimg" src="cts.jpg" alt="CTS Map">
-    </div>
-</div>
+  <img id="mapimg" src="CTS.jpg" alt="CTS Map">
+  </div>
 
 <div class="controls">
   <div id="status" class="status-line">設定待機中...</div>
@@ -120,7 +106,7 @@
     <b>補正手順:</b><br>
     青いピン(LT, LB, RB)をドラッグして、<br>
     地図上の「正しい座標位置（角など）」に合わせてください。<br>
-    画像サイズ: 1601x1023 (Aspect 63.9%)
+    現在地(赤)が自動で補正されます。
   </div>
   <button onclick="toggleGPS()">GPS再取得</button>
 </div>
@@ -137,7 +123,7 @@ const GeoPoints = {
   RB: { lat: d(42,45,42.58), lon: d(141,42,13.89) }
 };
 
-// 初期表示位置（％）
+// 初期表示位置（％）- 最初は少し内側に配置して見つけやすくします
 const InitPos = {
   LT: { x: 5,  y: 5 },
   LB: { x: 5,  y: 95 },
@@ -147,16 +133,16 @@ const InitPos = {
 //=========================================
 // 2. システム変数
 //=========================================
-let currentRefPos = JSON.parse(JSON.stringify(InitPos)); 
+let currentRefPos = JSON.parse(JSON.stringify(InitPos)); // 現在の青ピン位置
 let mapTransform = null;
-const frame = document.querySelector(".img-container"); // マーカー配置先を変更
+const frame = document.getElementById("frame");
 const img = document.getElementById("mapimg");
 const status = document.getElementById("status");
 
 //=========================================
 // 3. 初期化処理
 //=========================================
-window.onload = () => {
+img.onload = () => {
   createDraggableMarker("LT");
   createDraggableMarker("LB");
   createDraggableMarker("RB");
@@ -177,13 +163,13 @@ function createDraggableMarker(key) {
   
   frame.appendChild(el);
 
-  // ドラッグイベント
+  // ドラッグイベント設定 (Touch & Mouse)
   let isDragging = false;
 
   const onStart = (e) => {
     isDragging = true;
     el.style.zIndex = 2000;
-    e.preventDefault(); // スクロール防止
+    e.preventDefault();
   };
 
   const onMove = (e) => {
@@ -193,7 +179,10 @@ function createDraggableMarker(key) {
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-    const rect = frame.getBoundingClientRect();
+    // フレーム内での位置計算
+    const rect = img.getBoundingClientRect();
+    // スクロールオフセット考慮
+    const frameRect = frame.getBoundingClientRect();
     
     // 画像左上からの相対座標
     let x = clientX - rect.left;
@@ -210,7 +199,10 @@ function createDraggableMarker(key) {
     // データ更新
     currentRefPos[key] = { x: px, y: py };
     
+    // リアルタイムで行列再計算
     recalculateMatrix();
+    
+    // 最新のGPS位置で赤ピンを再描画（もしあれば）
     if(lastGPSPos) updateRedPin(lastGPSPos);
   };
 
@@ -221,7 +213,7 @@ function createDraggableMarker(key) {
   };
 
   el.addEventListener("mousedown", onStart);
-  el.addEventListener("touchstart", onStart, { passive: false });
+  el.addEventListener("touchstart", onStart);
   
   window.addEventListener("mousemove", onMove);
   window.addEventListener("touchmove", onMove, { passive: false });
@@ -231,7 +223,7 @@ function createDraggableMarker(key) {
 }
 
 //=========================================
-// 4. アフィン変換行列の計算
+// 4. アフィン変換行列の計算 (Core Logic)
 //=========================================
 function geoToMeters(lat, lon, baseLat) {
   const R = 6378137;
@@ -249,7 +241,7 @@ function recalculateMatrix() {
   const P2 = geoToMeters(GeoPoints.LB.lat, GeoPoints.LB.lon, baseLat);
   const P3 = geoToMeters(GeoPoints.RB.lat, GeoPoints.RB.lon, baseLat);
 
-  // 画像座標（パーセント）
+  // 画像座標（パーセント）※ドラッグされた現在位置を使用
   const Q1 = currentRefPos.LT;
   const Q2 = currentRefPos.LB;
   const Q3 = currentRefPos.RB;
@@ -261,9 +253,9 @@ function recalculateMatrix() {
   const Qx_v1 = Q2.x - Q1.x; const Qy_v1 = Q2.y - Q1.y;
   const Qx_v2 = Q3.x - Q1.x; const Qy_v2 = Q3.y - Q1.y;
 
-  // 逆行列
+  // 逆行列 det
   const det = Px_v1 * Py_v2 - Px_v2 * Py_v1;
-  if (Math.abs(det) < 1e-9) return;
+  if (Math.abs(det) < 1e-9) return; // エラー
 
   const invP = [
     [Py_v2 / det, -Px_v2 / det],
@@ -276,7 +268,7 @@ function recalculateMatrix() {
   const m21 = Qy_v1 * invP[0][0] + Qy_v2 * invP[1][0];
   const m22 = Qy_v1 * invP[0][1] + Qy_v2 * invP[1][1];
 
-  // 変換関数
+  // 変換関数を更新
   mapTransform = function(lat, lon) {
     const cur = geoToMeters(lat, lon, baseLat);
     const dx = cur.x - P1.x;
@@ -334,6 +326,7 @@ function updateRedPin(pos) {
   
   status.textContent = `Lat: ${lat.toFixed(5)}, Lon: ${lon.toFixed(5)} (±${Math.round(acc)}m)`;
   
+  // 範囲外チェック表示
   if (p.x < 0 || p.x > 100 || p.y < 0 || p.y > 100) {
      m.style.opacity = 0.5;
      m.querySelector(".gps-label").innerText = "範囲外";
